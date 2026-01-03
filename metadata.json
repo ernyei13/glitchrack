@@ -1,5 +1,7 @@
 {
   "name": "GlitchForge Video Editor",
   "description": "A web-based video editor specializing in pixel sorting, datamoshing simulations, and glitch aesthetics using React and HTML5 Canvas. Includes AI-powered effect generation.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "camera"
+  ]
 }

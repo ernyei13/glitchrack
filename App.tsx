@@ -42,6 +42,21 @@ const App: React.FC = () => {
   const handleMidiMessage = (control: number, value: number) => {
       const pipe = pipelineRef.current;
 
+      // --- STRATEGY 0: BUTTONS = TOGGLE ENABLE/DISABLE ---
+      if (CONTROL_XL_MAP.BUTTONS_TRACK.includes(control)) {
+          // Only toggle on press (value ~ 1.0), ignore release (value ~ 0)
+          if (value > 0.5) {
+              const btnIdx = CONTROL_XL_MAP.BUTTONS_TRACK.indexOf(control);
+              setPipeline(prev => prev.map((node, i) => {
+                  if (i === btnIdx) {
+                      return { ...node, active: !node.active };
+                  }
+                  return node;
+              }));
+          }
+          return;
+      }
+
       // --- STRATEGY 1: FADERS = MIX / STRENGTH (Dry/Wet) ---
       // Map Fader 1 (Index 0) to Effect 1 Mix, Fader 2 to Effect 2 Mix, etc.
       if (CONTROL_XL_MAP.FADERS.includes(control)) {
@@ -75,9 +90,7 @@ const App: React.FC = () => {
       }
 
       // --- STRATEGY 2: KNOBS = LINEAR PARAMS ---
-      // Map all other controls linearly to parameters, SKIPPING 'mix' if possible 
-      // (since mix is on fader), or just mapping everything sequentially.
-      // To keep it simple and powerful: We map linear knobs to *all* range parameters.
+      // Map all other controls linearly to parameters.
       
       const controlIdx = ALL_CONTROLS.indexOf(control);
       if (controlIdx === -1) return; 
@@ -93,10 +106,6 @@ const App: React.FC = () => {
           if (!def) continue;
 
           for (const param of def.defaultParams) {
-              // We map Knobs to ALL range params. 
-              // If you want to exclude 'mix' from knobs because it's on faders, 
-              // we could add `if (param.id === 'mix') continue;` here.
-              // But redundancy is often fine. Let's keep it linear for now.
               if (param.type === 'range') {
                   if (paramCounter === controlIdx) {
                       targetNodeId = node.id;
@@ -179,6 +188,28 @@ const App: React.FC = () => {
           active: inputs.length === 0 // Active by default if first
       };
       setInputs(prev => [...prev, newSource]);
+  };
+  
+  const handleAddCameraInput = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 } });
+      const vid = document.createElement('video');
+      vid.srcObject = stream;
+      vid.autoplay = true;
+      vid.muted = true;
+      vid.play();
+
+      const newSource: VideoSource = {
+        id: uid(),
+        url: 'Live Camera',
+        element: vid,
+        active: inputs.length === 0
+      };
+      setInputs(prev => [...prev, newSource]);
+    } catch (e) {
+      console.error("Camera access denied", e);
+      alert("Could not access camera. Please allow permissions.");
+    }
   };
   
   const handleToggleInput = (id: string) => {
@@ -272,6 +303,7 @@ const App: React.FC = () => {
         onUpdateParam={handleUpdateParam}
         onToggleInput={handleToggleInput}
         onAddInput={handleAddInput}
+        onAddCamera={handleAddCameraInput}
       />
     </div>
   );

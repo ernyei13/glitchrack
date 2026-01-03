@@ -1,7 +1,7 @@
 import React from 'react';
 import { EffectNode, EffectDefinition, VideoSource } from '../types';
 import { EFFECT_LIBRARY } from '../utils/effectLibrary';
-import { X, ArrowUp, ArrowDown, Sliders as SliderIcon, Plus, Video, GripVertical } from 'lucide-react';
+import { X, ArrowUp, ArrowDown, Sliders as SliderIcon, Plus, Video, GripVertical, Camera } from 'lucide-react';
 
 interface RackProps {
   pipeline: EffectNode[];
@@ -14,6 +14,7 @@ interface RackProps {
   onUpdateParam: (nodeId: string, paramId: string, value: any) => void;
   onToggleInput: (id: string) => void;
   onAddInput: (file: File) => void;
+  onAddCamera: () => void;
 }
 
 export const Rack: React.FC<RackProps> = ({
@@ -26,7 +27,8 @@ export const Rack: React.FC<RackProps> = ({
   onSelectEffect,
   onUpdateParam,
   onToggleInput,
-  onAddInput
+  onAddInput,
+  onAddCamera
 }) => {
   
   const selectedNode = pipeline.find(n => n.id === selectedEffectId);
@@ -49,7 +51,7 @@ export const Rack: React.FC<RackProps> = ({
            <div className="space-y-2">
               {inputs.map((inp, idx) => (
                   <div key={inp.id} className={`flex items-center justify-between p-2 rounded text-xs border ${inp.active ? 'border-cyber-accent bg-cyber-accent/10' : 'border-gray-700 bg-black'}`}>
-                      <div className="truncate flex-1" title={inp.url}>Source {idx + 1}</div>
+                      <div className="truncate flex-1" title={inp.url}>{inp.url.startsWith('blob') ? `Source ${idx + 1}` : inp.url}</div>
                       <input 
                         type="checkbox" 
                         checked={inp.active} 
@@ -58,10 +60,18 @@ export const Rack: React.FC<RackProps> = ({
                       />
                   </div>
               ))}
-              <label className="flex items-center justify-center p-2 border border-dashed border-gray-600 rounded text-xs text-gray-500 hover:text-white hover:border-white cursor-pointer transition-colors">
-                  <Plus size={14} className="mr-1"/> Add Video File
-                  <input type="file" accept="video/*" className="hidden" onChange={(e) => e.target.files?.[0] && onAddInput(e.target.files[0])} />
-              </label>
+              <div className="grid grid-cols-2 gap-2">
+                  <label className="flex items-center justify-center p-2 border border-dashed border-gray-600 rounded text-xs text-gray-500 hover:text-white hover:border-white cursor-pointer transition-colors">
+                      <Plus size={14} className="mr-1"/> File
+                      <input type="file" accept="video/*" className="hidden" onChange={(e) => e.target.files?.[0] && onAddInput(e.target.files[0])} />
+                  </label>
+                  <button 
+                      onClick={onAddCamera}
+                      className="flex items-center justify-center p-2 border border-dashed border-gray-600 rounded text-xs text-gray-500 hover:text-white hover:border-white cursor-pointer transition-colors"
+                  >
+                      <Camera size={14} className="mr-1"/> Cam
+                  </button>
+              </div>
            </div>
         </div>
 

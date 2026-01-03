@@ -36,6 +36,126 @@ const tempBuffers: Record<string, HTMLCanvasElement> = {};
 const frameCounters: Record<string, number> = {};
 
 export const EFFECT_LIBRARY: EffectDefinition[] = [
+    // --- TIME EFFECTS ---
+    {
+        id: 'time_scan',
+        name: 'Time Scan',
+        category: 'Time',
+        description: 'Slit-scan time displacement. Freeze time in strips.',
+        defaultParams: [
+            { id: 'mix', label: 'Mix', type: 'range', min: 0, max: 1, value: 1, step: 0.01 },
+            { id: 'speed', label: 'Speed', type: 'range', min: -20, max: 20, value: 2, step: 0.1 },
+            { id: 'scanOffset', label: 'Start / Offset', type: 'range', min: 0, max: 1, value: 0, step: 0.001 },
+            { id: 'slit', label: 'Slit Width', type: 'range', min: 1, max: 50, value: 2, step: 1 },
+            { id: 'direction', label: 'Axis', type: 'select', options: ['X', 'Y'], value: 'Y' },
+            { id: 'behavior', label: 'Mode', type: 'select', options: ['Scan', 'Scroll'], value: 'Scan' }
+        ],
+        process: (ctx, input, w, h, params) => {
+            if (params.mix <= 0) { ctx.drawImage(input,0,0); return; }
+
+            // Ensure buffer exists
+            if (!feedbackBuffers['time_scan']) feedbackBuffers['time_scan'] = createTempCanvas(w, h);
+            const fb = feedbackBuffers['time_scan'];
+            if(fb.width !== w) { fb.width = w; fb.height = h; }
+            const fbCtx = fb.getContext('2d')!;
+
+            // State for scan position
+            if (frameCounters['time_scan_pos'] === undefined) frameCounters['time_scan_pos'] = 0;
+            
+            const speed = params.speed;
+            const slit = Math.max(1, params.slit);
+            const vertical = params.direction === 'Y';
+            const limit = vertical ? h : w;
+            
+            if (params.behavior === 'Scan') {
+                // SCANNER MODE: Updates a strip of the buffer at the moving scan line position
+                
+                // Update position
+                frameCounters['time_scan_pos'] += speed;
+                
+                // Calculate Effective Position (Animation + Manual Offset)
+                const offsetPixels = (params.scanOffset * limit);
+                let effectivePos = (frameCounters['time_scan_pos'] + offsetPixels) % limit;
+                if (effectivePos < 0) effectivePos += limit;
+                
+                const pos = Math.floor(effectivePos);
+
+                // Draw slit from INPUT to BUFFER at current Position
+                if (vertical) {
+                    // Updating a horizontal row at Y=pos
+                    fbCtx.drawImage(input, 0, pos, w, slit, 0, pos, w, slit);
+                } else {
+                    // Updating a vertical column at X=pos
+                    fbCtx.drawImage(input, pos, 0, slit, h, pos, 0, slit, h);
+                }
+                
+                // Draw Buffer
+                ctx.drawImage(fb, 0, 0);
+
+                // Optional: Draw the "Scan Line" indicator if speed is 0 to help manual positioning
+                if (Math.abs(speed) < 0.1) {
+                    ctx.save();
+                    ctx.fillStyle = 'rgba(0, 255, 157, 0.5)';
+                    if (vertical) ctx.fillRect(0, pos, w, 2);
+                    else ctx.fillRect(pos, 0, 2, h);
+                    ctx.restore();
+                }
+
+            } else {
+                // SCROLL MODE (Waterfall): Shifts the buffer and adds new line at edge
+                
+                const shift = Math.abs(speed); 
+                if (shift < 0.1) {
+                     ctx.drawImage(fb, 0, 0);
+                     return;
+                }
+                
+                if (!tempBuffers['scan_swap']) tempBuffers['scan_swap'] = createTempCanvas(w, h);
+                const swap = tempBuffers['scan_swap'];
+                if(swap.width !== w) { swap.width = w; swap.height = h; }
+                const swapCtx = swap.getContext('2d')!;
+                
+                swapCtx.clearRect(0,0,w,h);
+                swapCtx.drawImage(fb, 0, 0); // Copy current buffer to swap
+                
+                fbCtx.clearRect(0,0,w,h); // Clear FB
+
+                const sY = Math.min(Math.max(0, params.scanOffset * h), h-1);
+                const sX = Math.min(Math.max(0, params.scanOffset * w), w-1);
+
+                if (vertical) {
+                     if (speed > 0) {
+                        fbCtx.drawImage(swap, 0, 0, w, h - shift, 0, shift, w, h - shift); 
+                        fbCtx.drawImage(input, 0, sY, w, shift, 0, 0, w, shift); 
+                     } else {
+                        const absSpeed = Math.abs(speed);
+                        fbCtx.drawImage(swap, 0, absSpeed, w, h - absSpeed, 0, 0, w, h - absSpeed); 
+                        fbCtx.drawImage(input, 0, sY, w, absSpeed, 0, h - absSpeed, w, absSpeed); 
+                     }
+                } else {
+                     if (speed > 0) {
+                        fbCtx.drawImage(swap, 0, 0, w - shift, h, shift, 0, w - shift, h);
+                        fbCtx.drawImage(input, sX, 0, shift, h, 0, 0, shift, h);
+                     } else {
+                        const absSpeed = Math.abs(speed);
+                        fbCtx.drawImage(swap, absSpeed, 0, w - absSpeed, h, 0, 0, w - absSpeed, h);
+                        fbCtx.drawImage(input, sX, 0, absSpeed, h, w - absSpeed, 0, absSpeed, h);
+                     }
+                }
+                
+                ctx.drawImage(fb, 0, 0);
+            }
+            
+            // Mix Dry
+            if (params.mix < 1) {
+                ctx.save();
+                ctx.globalAlpha = 1 - params.mix;
+                ctx.drawImage(input, 0, 0);
+                ctx.restore();
+            }
+        }
+    },
+
     // --- ADVANCED PIXEL SORT ---
     {
         id: 'pixel_sort_pro',
@@ -154,10 +274,10 @@ export const EFFECT_LIBRARY: EffectDefinition[] = [
             { id: 'mix', label: 'Dry / Wet', type: 'range', min: 0, max: 1, value: 1, step: 0.01 },
             { id: 'speed', label: 'Update Speed', type: 'range', min: 0.01, max: 1, value: 1, step: 0.01 },
             { id: 'decay', label: 'Decay', type: 'range', min: 0, max: 0.99, value: 0.95, step: 0.01 },
-            { id: 'scale', label: 'Scale', type: 'range', min: 0.5, max: 2.0, value: 1.01, step: 0.001 }, // Increased range
-            { id: 'rotate', label: 'Rotate', type: 'range', min: -180, max: 180, value: 0, step: 0.1 }, // Destructive range
-            { id: 'tx', label: 'Move X', type: 'range', min: -500, max: 500, value: 0, step: 1 }, // Destructive range
-            { id: 'hue', label: 'Hue Shift', type: 'range', min: -180, max: 180, value: 1, step: 0.1 }, // Full spectrum
+            { id: 'scale', label: 'Scale', type: 'range', min: 0.5, max: 2.0, value: 1.01, step: 0.001 },
+            { id: 'rotate', label: 'Rotate', type: 'range', min: -180, max: 180, value: 0, step: 0.1 }, 
+            { id: 'tx', label: 'Move X', type: 'range', min: -500, max: 500, value: 0, step: 1 }, 
+            { id: 'hue', label: 'Hue Shift', type: 'range', min: -180, max: 180, value: 1, step: 0.1 },
             { id: 'blend', label: 'Mode', type: 'select', options: ['source-over', 'screen', 'difference', 'overlay', 'hard-light'], value: 'hard-light' }
         ],
         process: (ctx, input, w, h, params) => {
@@ -213,8 +333,144 @@ export const EFFECT_LIBRARY: EffectDefinition[] = [
              }
         }
     },
+    {
+        id: 'hyper_echo',
+        name: 'Hyper Echo',
+        category: 'Feedback',
+        description: 'Deep feedback trails with zoom, rotation, and strobing.',
+        defaultParams: [
+            { id: 'mix', label: 'Decay/Trail', type: 'range', min: 0, max: 0.99, value: 0.85, step: 0.01 },
+            { id: 'zoom', label: 'Zoom', type: 'range', min: 0.5, max: 1.5, value: 1.05, step: 0.001 },
+            { id: 'spin', label: 'Spin', type: 'range', min: -45, max: 45, value: 0, step: 0.1 },
+            { id: 'xOff', label: 'Shift X', type: 'range', min: -100, max: 100, value: 0, step: 1 },
+            { id: 'yOff', label: 'Shift Y', type: 'range', min: -100, max: 100, value: 0, step: 1 },
+            { id: 'hue', label: 'Hue Cycle', type: 'range', min: 0, max: 180, value: 5, step: 1 },
+            { id: 'blend', label: 'Blend', type: 'select', options: ['source-over', 'screen', 'lighten', 'difference', 'multiply'], value: 'screen' }
+        ],
+        process: (ctx, input, w, h, params) => {
+            // Setup Buffer
+            if (!feedbackBuffers['hyper_echo']) feedbackBuffers['hyper_echo'] = createTempCanvas(w, h);
+            const fb = feedbackBuffers['hyper_echo'];
+            if(fb.width !== w) { fb.width = w; fb.height = h; }
+            const fbCtx = fb.getContext('2d')!;
+
+            // 1. Clear Main Canvas
+            ctx.clearRect(0,0,w,h);
+
+            // 2. Draw Feedback Loop onto Main Canvas (The "Echo")
+            ctx.save();
+            ctx.translate(w/2, h/2);
+            ctx.scale(params.zoom, params.zoom);
+            ctx.rotate(params.spin * 0.01745); // Deg to Rad
+            ctx.translate(params.xOff, params.yOff);
+            ctx.translate(-w/2, -h/2);
+            ctx.globalAlpha = params.mix; // Decay
+            if (params.hue !== 0) ctx.filter = `hue-rotate(${params.hue}deg)`;
+            ctx.drawImage(fb, 0, 0);
+            ctx.restore();
+
+            // 3. Composite New Input Frame
+            ctx.save();
+            ctx.globalCompositeOperation = params.blend;
+            // Note: If blend is 'source-over', input covers echo.
+            // If we want echo 'in front', we reverse order, but standard echo puts input in front.
+            // However, typical video feedback logic is: Buffer = (Buffer * decay) + Input
+            ctx.drawImage(input, 0, 0, w, h);
+            ctx.restore();
+
+            // 4. Capture Result back to Buffer
+            fbCtx.clearRect(0,0,w,h);
+            fbCtx.drawImage(ctx.canvas, 0, 0);
+        }
+    },
 
     // --- NEW GEOMETRY EFFECTS ---
+    {
+        id: 'vertex_displacement',
+        name: '3D Vertex Displacement',
+        category: 'Geometry',
+        description: 'Simulates a 3D mesh where vertices are displaced by noise or audio.',
+        defaultParams: [
+            { id: 'mix', label: 'Mix', type: 'range', min: 0, max: 1, value: 1, step: 0.01 },
+            { id: 'density', label: 'Mesh Density', type: 'range', min: 5, max: 50, value: 20, step: 1 },
+            { id: 'amount', label: 'Displacement', type: 'range', min: 0, max: 100, value: 30, step: 1 },
+            { id: 'speed', label: 'Speed', type: 'range', min: 0, max: 5, value: 1, step: 0.1 },
+            { id: 'sensitivity', label: 'Audio Sens', type: 'range', min: 0, max: 5, value: 1, step: 0.1 },
+            { id: 'mode', label: 'Driver', type: 'select', options: ['Noise', 'Sine', 'Audio Sim'], value: 'Noise' }
+        ],
+        process: (ctx, input, w, h, params, t) => {
+            if (params.mix <= 0) { ctx.drawImage(input, 0, 0); return; }
+
+            // Cache input for sampling
+            if (!tempBuffers['vertex_mesh']) tempBuffers['vertex_mesh'] = createTempCanvas(w, h);
+            const tb = tempBuffers['vertex_mesh'];
+            if(tb.width !== w) { tb.width = w; tb.height = h; }
+            const tbCtx = tb.getContext('2d')!;
+            tbCtx.drawImage(input, 0, 0, w, h);
+
+            ctx.clearRect(0,0,w,h);
+
+            const cols = Math.floor(params.density);
+            const rows = Math.floor(params.density);
+            const cw = w / cols;
+            const ch = h / rows;
+            const amp = params.amount;
+
+            for(let y=0; y<rows; y++) {
+                for(let x=0; x<cols; x++) {
+                    const cx = x * cw;
+                    const cy = y * ch;
+                    const centerX = cx + cw/2;
+                    const centerY = cy + ch/2;
+
+                    // Calculate Displacement based on mode
+                    let z = 0;
+                    if (params.mode === 'Noise') {
+                         // Perlin-ish noise approximation
+                         z = Math.sin(x * 0.32 + t * params.speed) + Math.cos(y * 0.45 - t * params.speed * 1.2);
+                         z /= 2;
+                    } else if (params.mode === 'Sine') {
+                         // Radial sine wave
+                         const dist = Math.sqrt(Math.pow(x - cols/2, 2) + Math.pow(y - rows/2, 2));
+                         z = Math.sin(dist * 0.5 - t * params.speed);
+                    } else {
+                         // Audio Sim: High frequency random jitter simulating audio bands
+                         // Using time and position to seed pseudo-randomness that is frame-coherent enough
+                         const rand = Math.sin(x * 12.9898 + y * 78.233 + t * 50); 
+                         z = rand * params.sensitivity;
+                    }
+
+                    // Apply intensity
+                    const displacement = z * amp;
+
+                    // 3D Projection Simulation
+                    // We simulate Z depth by scaling the cell and shifting it relative to center
+                    // Positive Z = Closer (Larger scale, shift away from center)
+                    const scale = 1 + (displacement * 0.01);
+                    
+                    // Offset based on "Angle of View" simulation (Wobble)
+                    const offX = displacement * Math.cos(t * 0.5) * 0.5;
+                    const offY = displacement * Math.sin(t * 0.5) * 0.5;
+
+                    const dw = cw * scale;
+                    const dh = ch * scale;
+                    
+                    // Draw cell centered at new position
+                    // Source: cx, cy, cw, ch
+                    // Dest: shifted center
+                    ctx.drawImage(tb, cx, cy, cw, ch, (cx + offX) - (dw - cw)/2, (cy + offY) - (dh - ch)/2, dw, dh);
+                }
+            }
+
+             if (params.mix < 1) {
+                 ctx.save();
+                 ctx.globalAlpha = 1 - params.mix;
+                 ctx.drawImage(input, 0, 0);
+                 ctx.restore();
+             }
+        }
+    },
+
     {
         id: 'fractal_tiling',
         name: 'Fractal Tiling',
@@ -281,15 +537,6 @@ export const EFFECT_LIBRARY: EffectDefinition[] = [
                     }
                     
                     // Drawing
-                    // To scroll, we can just draw the image offset, but we need it to wrap.
-                    // Complex wrapping in Canvas2D is slow manually.
-                    // Simpler: Just translate the draw position inverse to scroll, and draw 9 copies? Too slow.
-                    // Fast trick: Draw with pattern?
-                    // Fast trick 2: Just draw the input image large enough? No.
-                    // Let's implement scroll by shifting the Source Rect UVs if possible? 
-                    // ctx.drawImage(image, sx, sy, sWidth, sHeight, dx, dy, dWidth, dHeight)
-                    
-                    // Calculating wrapping source rects:
                     const effW = w; 
                     const effH = h;
                     let sx = (-offX) % effW;
@@ -297,24 +544,10 @@ export const EFFECT_LIBRARY: EffectDefinition[] = [
                     if (sx < 0) sx += effW;
                     if (sy < 0) sy += effH;
 
-                    // Drawing wrapping image into tile (dx=0, dy=0, dw=tileW, dh=tileH)
-                    // We need to draw the source image scaled to match the tile size?
-                    // Usually tiling implies the source is mapped 1:1 or scaled? 
-                    // Let's map the Full Source Image to the Tile Size.
-                    
-                    // If we want to scroll the TEXTURE inside the tile:
-                    // We draw the image offset.
-                    // To wrap, we might need to draw up to 4 times.
-                    
                     // Optimize: If scroll is 0, one draw.
                     if (Math.abs(params.scrollX) < 0.1 && Math.abs(params.scrollY) < 0.1) {
                          ctx.drawImage(input, 0, 0, w, h, 0, 0, tileW, tileH);
                     } else {
-                         // Draw 2x2 grid of the source image relative to the tile clip?
-                         // Actually, creating a pattern is easiest for wrapping.
-                         // But createPattern is slow per frame? 
-                         // Let's use the 4-draw method.
-                         
                          // Relative shift in 0..1 space
                          const u = sx / effW; 
                          const v = sy / effH;
@@ -386,6 +619,81 @@ export const EFFECT_LIBRARY: EffectDefinition[] = [
                  ctx.drawImage(input, 0, 0);
                  ctx.restore();
              }
+        }
+    },
+    {
+        id: 'spectral_acid',
+        name: 'Spectral Acid',
+        category: 'Color',
+        description: 'Psychedelic gradient mapping and hue cycling.',
+        defaultParams: [
+            { id: 'mix', label: 'Mix', type: 'range', min: 0, max: 1, value: 1, step: 0.01 },
+            { id: 'speed', label: 'Cycle Speed', type: 'range', min: 0, max: 10, value: 2, step: 0.1 },
+            { id: 'freq', label: 'Banding', type: 'range', min: 1, max: 20, value: 3, step: 0.1 },
+            { id: 'pop', label: 'Pop/Neon', type: 'range', min: 0, max: 1, value: 0.5, step: 0.01 },
+            { id: 'mode', label: 'Palette', type: 'select', options: ['Rainbow', 'Thermal', 'Plasma'], value: 'Rainbow' }
+        ],
+        process: (ctx, input, w, h, params, t) => {
+            if (params.mix <= 0) { ctx.drawImage(input, 0, 0); return; }
+            
+            ctx.drawImage(input, 0, 0, w, h);
+            const idata = ctx.getImageData(0,0,w,h);
+            const d = idata.data;
+            const len = d.length;
+            
+            const time = t * params.speed;
+            const freq = params.freq * 0.1;
+            
+            for(let i=0; i<len; i+=4) {
+                const r = d[i];
+                const g = d[i+1];
+                const b = d[i+2];
+                
+                // Luminance
+                const l = (r + g + b) / 765; // 0-1
+                
+                // Map luminance to color based on mode
+                let nr, ng, nb;
+                
+                // Value to drive the cosine palette
+                const v = (l * 10 * freq) + time;
+                
+                if (params.mode === 'Rainbow') {
+                    // Cosine based rainbow
+                    nr = (0.5 + 0.5 * Math.cos(v)) * 255;
+                    ng = (0.5 + 0.5 * Math.cos(v + 2.09)) * 255; // + 1/3 tau
+                    nb = (0.5 + 0.5 * Math.cos(v + 4.18)) * 255; // + 2/3 tau
+                } else if (params.mode === 'Plasma') {
+                    nr = (0.5 + 0.5 * Math.sin(v)) * 255;
+                    ng = (0.5 + 0.5 * Math.cos(v * 1.3)) * 255;
+                    nb = (0.5 + 0.5 * Math.sin(v * 0.7)) * 255;
+                } else { // Thermal
+                    const h = (l + time * 0.1) % 1;
+                    // Tight cosine approximation for thermal spectrum
+                    nr = Math.max(0, Math.min(255, (1.5 - Math.abs(h * 6 - 3)) * 255));
+                    ng = Math.max(0, Math.min(255, (1.5 - Math.abs(h * 6 - 2)) * 255));
+                    nb = Math.max(0, Math.min(255, (1.5 - Math.abs(h * 6 - 4.5)) * 255));
+                }
+                
+                // Pop: Increase contrast/saturation
+                if (params.pop > 0) {
+                     nr = (nr - 128) * (1 + params.pop) + 128;
+                     ng = (ng - 128) * (1 + params.pop) + 128;
+                     nb = (nb - 128) * (1 + params.pop) + 128;
+                }
+
+                if (params.mix < 1) {
+                    d[i] = r * (1 - params.mix) + nr * params.mix;
+                    d[i+1] = g * (1 - params.mix) + ng * params.mix;
+                    d[i+2] = b * (1 - params.mix) + nb * params.mix;
+                } else {
+                    d[i] = nr;
+                    d[i+1] = ng;
+                    d[i+2] = nb;
+                }
+            }
+            
+            ctx.putImageData(idata, 0, 0);
         }
     },
     {
